@@ -8,6 +8,7 @@ const workingHoursRoute = require("./workingHours.routes")
 const productsRoute = require("./products.routes")
 const clientsRoute = require("./clients.routes")
 const ordersRoute = require("./orders.routes")
+const additionalRoute = require("./additional.routes")
 
 routes.use("/superadmin", superAdminRoute)
 routes.use("/companies", companiesRoute)
@@ -16,5 +17,6 @@ routes.use("/working-hours", workingHoursRoute)
 routes.use("/products", productsRoute)
 routes.use("/clients", clientsRoute)
 routes.use("/orders", ordersRoute)
+routes.use("/additional", additionalRoute)
 
 module.exports = routes

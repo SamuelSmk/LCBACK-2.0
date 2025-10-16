@@ -3,7 +3,7 @@
  * @returns { Promise<void> }
  */
 exports.up = function(knex) {
-  return knex.schema.createTable('profissionals', function(table) {
+  return knex.schema.createTable('professionals', function(table) {
     table.increments('id').primary();
     table.integer('company_id').unsigned().notNullable();
     table.foreign('company_id').references('id').inTable('companies').onDelete('CASCADE');
@@ -22,5 +22,5 @@ exports.up = function(knex) {
  * @returns { Promise<void> }
  */
 exports.down = function(knex) {
-  return knex.schema.dropTable('profissionals');
+  return knex.schema.dropTable('professionals');
 };

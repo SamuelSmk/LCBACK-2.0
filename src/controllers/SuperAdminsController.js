@@ -8,6 +8,10 @@ class SuperAdminsController {
     const { name, email, password, document, phone_number } = req.body;
     const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss");
 
+    // Log para debug
+    console.log("Body recebido:", req.body);
+    console.log("Campos:", { name, email, password, document, phone_number });
+
     if (!name || !email || !password || !document || !phone_number) {
       throw new ErrorApplication("Todos os campos são obrigatórios.");
     }

@@ -4,7 +4,7 @@ const knex = require("../database/knex")
 
 class ClientsController {
   async create(req, res) {
-    const { name, phone_number, address, document } = req.body
+    const { name, phone, address, document, email} = req.body
     const { company_id } = req.headers
 
     if (!company_id) {
@@ -35,9 +35,10 @@ class ClientsController {
     const [client] = await knex("clients")
       .insert({
         name,
-        phone_number,
-        address,
-        document,
+        phone: phone || null,
+        address: address || null,
+        document: document || null,
+        email: email || null,
         company_id,
         created_at: now,
         updated_at: now,
@@ -45,9 +46,10 @@ class ClientsController {
       .returning([
         "id",
         "name",
-        "phone_number",
+        "phone",
         "address",
         "document",
+        "email",
         "company_id",
         "created_at",
         "updated_at",
@@ -68,7 +70,7 @@ class ClientsController {
       .select(
         "id",
         "name",
-        "phone_number",
+        "phone",
         "address",
         "document",
         "created_at",
@@ -79,7 +81,7 @@ class ClientsController {
     if (term) {
       clientsQuery = clientsQuery.where(function() {
         this.where("name", "like", `%${term}%`)
-          .orWhere("phone_number", "like", `%${term}%`)
+          .orWhere("phone", "like", `%${term}%`)
           .orWhere("document", "like", `%${term}%`)
       })
     }
@@ -106,7 +108,7 @@ class ClientsController {
     }
 
     const client = await knex("clients")
-      .select("id", "name", "phone_number", "address", "document", "company_id", "created_at", "updated_at")
+      .select("id", "name", "phone", "address", "document", "company_id", "created_at", "updated_at")
       .where({ id, company_id })
       .first()
     
@@ -140,7 +142,7 @@ class ClientsController {
 
   async update(req, res) {
     const { id } = req.params
-    const { name, phone_number, address, document } = req.body
+    const { name, phone, address, document } = req.body
     const { company_id } = req.headers
 
     if (!company_id) {
@@ -169,15 +171,15 @@ class ClientsController {
 
     const updatedData = {
       name,
-      phone_number,
-      address,
-      document,
+      phone: phone || null,
+      address: address || null,
+      document: document || null,
     }
 
     await knex("clients").update(updatedData).where({ id, company_id })
 
     const updatedClient = await knex("clients")
-      .select("id", "name", "phone_number", "address", "document", "company_id", "created_at", "updated_at")
+      .select("id", "name", "phone", "address", "document", "company_id", "created_at", "updated_at")
       .where({ id, company_id })
       .first()
 
@@ -200,7 +202,7 @@ class ClientsController {
     }
 
     const client = await knex("clients")
-      .select("id", "name", "phone_number", "address", "document", "company_id", "created_at", "updated_at")
+      .select("id", "name", "phone", "address", "document", "company_id", "created_at", "updated_at")
       .where({ document, company_id })
       .first()
     

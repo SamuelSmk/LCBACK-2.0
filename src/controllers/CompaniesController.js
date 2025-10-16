@@ -4,7 +4,7 @@ const moment = require("moment-timezone")
 
 class CompaniesController {
   async create(req, res) {
-    const { name, document, phone_number, address, email, plan_id, subdomain } = req.body
+    const { name, document, phone_number, address, email} = req.body
     const { superadmin_id } = req.headers
     const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss")
 

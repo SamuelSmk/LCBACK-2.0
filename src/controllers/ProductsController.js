@@ -26,7 +26,7 @@ class ProductsController {
 
     const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss")
 
-    const [product] = await knex("products")
+    const [product] = await knex("produtos")
       .insert({
         name,
         price: parseFloat(price),
@@ -56,7 +56,7 @@ class ProductsController {
       throw new ErrorApplication("É necessário enviar o ID da empresa")
     }
 
-    let productsQuery = knex("products")
+    let productsQuery = knex("produtos")
       .select(
         "id",
         "name",
@@ -92,7 +92,7 @@ class ProductsController {
       throw new ErrorApplication("É necessário enviar o ID da empresa")
     }
 
-    const product = await knex("products")
+    const product = await knex("produtos")
       .select("id", "name", "price", "category", "company_id", "created_at", "updated_at")
       .where({ id, company_id })
       .first()
@@ -114,13 +114,13 @@ class ProductsController {
       )
     }
 
-    const product = await knex("products").where({ id, company_id }).first()
+    const product = await knex("produtos").where({ id, company_id }).first()
     
     if (!product) {
       throw new ErrorApplication("Produto não encontrado", 404)
     }
     
-    await knex("products").where({ id, company_id }).delete()
+    await knex("produtos").where({ id, company_id }).delete()
     
     return res.json({ message: "Produto excluído com sucesso" })
   }
@@ -134,7 +134,7 @@ class ProductsController {
       throw new ErrorApplication("É necessario enviar o ID da empresa")
     }
 
-    const product = await knex("products").where({ id, company_id }).first()
+    const product = await knex("produtos").where({ id, company_id }).first()
 
     if (!product) {
       return res.status(404).json({ message: "Produto não encontrado." })
@@ -152,9 +152,9 @@ class ProductsController {
       category,
     }
 
-    await knex("products").update(updatedData).where({ id, company_id })
+    await knex("produtos").update(updatedData).where({ id, company_id })
 
-    const updatedProduct = await knex("products")
+    const updatedProduct = await knex("produtos")
       .select("id", "name", "price", "category", "company_id", "created_at", "updated_at")
       .where({ id, company_id })
       .first()
@@ -172,7 +172,7 @@ class ProductsController {
       throw new ErrorApplication("É necessário enviar o ID da empresa")
     }
 
-    const categories = await knex("products")
+    const categories = await knex("produtos")
       .distinct("category")
       .where("company_id", company_id)
       .orderBy("category", "asc")
