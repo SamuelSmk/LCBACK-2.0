@@ -9,6 +9,8 @@ const productsRoute = require("./products.routes")
 const clientsRoute = require("./clients.routes")
 const ordersRoute = require("./orders.routes")
 const additionalRoute = require("./additional.routes")
+const paymentMethodsRoute = require("./paymentMethods.routes")
+const ordersItensRoute = require("./ordersItens.routes")
 
 routes.use("/superadmin", superAdminRoute)
 routes.use("/companies", companiesRoute)
@@ -18,5 +20,7 @@ routes.use("/products", productsRoute)
 routes.use("/clients", clientsRoute)
 routes.use("/orders", ordersRoute)
 routes.use("/additional", additionalRoute)
+routes.use("/payment-methods", paymentMethodsRoute)
+routes.use("/orders-itens", ordersItensRoute)
 
 module.exports = routes

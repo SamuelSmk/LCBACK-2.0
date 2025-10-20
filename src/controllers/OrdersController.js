@@ -4,7 +4,7 @@ const knex = require("../database/knex");
 
 class OrdersController {
   async create(req, res) {
-    const { client_id, address, payment_method, products } = req.body;
+    const { client_id, address, payment_method, products, notes } = req.body;
     const company_id = req.headers['company_id'];
 
     if (!company_id) {
@@ -73,10 +73,11 @@ class OrdersController {
           total_value: total_value,
           address: address || client.address,
           payment_method,
+          notes: notes || null,
           created_at: now,
           updated_at: now,
         })
-        .returning(['id', 'client_id', 'status', 'total_value', 'address', 'payment_method', 'created_at', 'updated_at']);
+        .returning(['id', 'client_id', 'status', 'total_value', 'address', 'payment_method', 'notes', 'created_at', 'updated_at']);
 
       // Inserir produtos do pedido
       const orderProducts = productsData.map(p => ({
@@ -118,6 +119,7 @@ class OrdersController {
         "orders.total_value",
         "orders.address",
         "orders.payment_method",
+        "orders.notes",
         "orders.created_at",
         "orders.updated_at",
         "clients.name as client_name",
@@ -207,7 +209,7 @@ class OrdersController {
 
   async update(req, res) {
     const { id } = req.params;
-    const { status, address, payment_method, products } = req.body;
+    const { status, address, payment_method, products, notes } = req.body;
     const company_id = req.headers['company_id'];
 
     if (!company_id) {
@@ -274,6 +276,7 @@ class OrdersController {
       if (status !== undefined) updatedData.status = status;
       if (address !== undefined) updatedData.address = address;
       if (payment_method !== undefined) updatedData.payment_method = payment_method;
+      if (notes !== undefined) updatedData.notes = notes;
 
       await trx("orders").update(updatedData).where({ id, company_id });
 
@@ -301,6 +304,7 @@ class OrdersController {
         "orders.total_value",
         "orders.address",
         "orders.payment_method",
+        "orders.notes",
         "orders.created_at",
         "orders.updated_at",
         "clients.name as client_name",
