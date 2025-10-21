@@ -1,380 +1,777 @@
-const ErrorApplication = require("../utils/ErrorApplication");
-const moment = require("moment-timezone");
-const knex = require("../database/knex");
+const knex = require('../database/knex');
+const ErrorApplication = require('../utils/ErrorApplication');
+const moment = require('moment-timezone');
 
 class OrdersController {
-  async create(req, res) {
-    const { client_id, address, payment_method, products, notes } = req.body;
-    const company_id = req.headers['company_id'];
-
-    if (!company_id) {
-      throw new ErrorApplication("company_id é obrigatório nos headers", 400);
-    }
-
-    if (!client_id || !products || !Array.isArray(products) || products.length === 0) {
-      throw new ErrorApplication("client_id e produtos são obrigatórios", 400);
-    }
-
-    // Verificar se a empresa existe
-    const company = await knex("companies").where({ id: company_id }).first();
-    if (!company) {
-      throw new ErrorApplication("Empresa não encontrada.", 404);
-    }
-
-    // Verificar se o cliente existe e pertence à empresa
-    const client = await knex("clients").where({ id: client_id, company_id }).first();
-    if (!client) {
-      throw new ErrorApplication("Cliente não encontrado nesta empresa.", 404);
-    }
-
-    // Validar e buscar preços dos produtos
-    let total_value = 0;
-    const productsData = [];
-
-    for (const item of products) {
-      if (!item.product_id || !item.quantity || item.quantity <= 0) {
-        throw new ErrorApplication("Cada produto deve ter product_id e quantity válida", 400);
-      }
-
-      const product = await knex("products")
-        .where({ id: item.product_id, company_id })
-        .first();
-
-      if (!product) {
-        throw new ErrorApplication(`Produto com ID ${item.product_id} não encontrado`, 404);
-      }
-
-      const unit_price = parseFloat(product.price);
-      const quantity = parseInt(item.quantity);
-      const subtotal = unit_price * quantity;
-
-      productsData.push({
-        product_id: item.product_id,
-        quantity: quantity,
-        unit_price: unit_price,
-        subtotal: subtotal
-      });
-
-      total_value += subtotal;
-    }
-
+  /**
+   * Cria um novo pedido com itens
+   */
+  async create(request, response) {
+    const { client_id, address, payment_method, notes, items } = request.body;
+    const { company_id } = request.headers;
     const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss");
-
-    // Criar pedido em transação
-    const trx = await knex.transaction();
-
+    
     try {
-      // Inserir pedido
-      const [order] = await trx("orders")
-        .insert({
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      // Verificar se o cliente existe
+      const clientExists = await knex('clients').where({ id: client_id, company_id }).first();
+      
+      if (!clientExists) {
+        throw new ErrorApplication('Cliente não encontrado para esta empresa', 404);
+      }
+
+      // Usar transação para garantir que tudo seja criado ou nada
+      const result = await knex.transaction(async trx => {
+        // Criar o pedido
+        const orderResult = await trx('orders').insert({
           company_id,
           client_id,
           status: 'pending',
-          total_value: total_value,
-          address: address || client.address,
-          payment_method,
+          address: address || clientExists.address,
+          payment_method: payment_method || null,
           notes: notes || null,
+          total_value: 0, // Será calculado depois
           created_at: now,
-          updated_at: now,
-        })
-        .returning(['id', 'client_id', 'status', 'total_value', 'address', 'payment_method', 'notes', 'created_at', 'updated_at']);
+          updated_at: now
+        }).returning('id');
+        
+        const order_id = Array.isArray(orderResult) ? (orderResult[0]?.id || orderResult[0]) : orderResult.id;
 
-      // Inserir produtos do pedido
-      const orderProducts = productsData.map(p => ({
-        order_id: order.id,
-        product_id: p.product_id,
-        quantity: p.quantity,
-        unit_price: p.unit_price,
-        subtotal: p.subtotal,
-        created_at: now
-      }));
-
-      await trx("order_products").insert(orderProducts);
-
-      await trx.commit();
-
-      // Buscar pedido completo com produtos
-      const fullOrder = await this.getOrderWithDetails(order.id, company_id);
-
-      return res.status(201).json(fullOrder);
-    } catch (error) {
-      await trx.rollback();
-      throw error;
-    }
-  }
-
-  async index(req, res) {
-    const company_id = req.headers['company_id'];
-    const { status, client_id, payment_method } = req.query;
-
-    if (!company_id) {
-      throw new ErrorApplication("company_id é obrigatório nos headers", 400);
-    }
-
-    let ordersQuery = knex("orders")
-      .select(
-        "orders.id",
-        "orders.client_id",
-        "orders.status",
-        "orders.total_value",
-        "orders.address",
-        "orders.payment_method",
-        "orders.notes",
-        "orders.created_at",
-        "orders.updated_at",
-        "clients.name as client_name",
-        "clients.phone_number as client_phone"
-      )
-      .leftJoin("clients", "orders.client_id", "clients.id")
-      .where("orders.company_id", company_id);
-
-    // Filtros
-    if (status) {
-      ordersQuery = ordersQuery.where("orders.status", status);
-    }
-
-    if (client_id) {
-      ordersQuery = ordersQuery.where("orders.client_id", client_id);
-    }
-
-    if (payment_method) {
-      ordersQuery = ordersQuery.where("orders.payment_method", payment_method);
-    }
-
-    const orders = await ordersQuery.orderBy("orders.created_at", "desc");
-
-    // Buscar produtos de cada pedido
-    for (const order of orders) {
-      const products = await knex("order_products")
-        .select(
-          "order_products.id",
-          "order_products.quantity",
-          "order_products.unit_price",
-          "order_products.subtotal",
-          "products.name as product_name",
-          "products.category as product_category"
-        )
-        .leftJoin("products", "order_products.product_id", "products.id")
-        .where("order_products.order_id", order.id);
-
-      order.products = products;
-    }
-
-    return res.json(orders);
-  }
-
-  async show(req, res) {
-    const { id } = req.params;
-    const company_id = req.headers['company_id'];
-
-    if (!id) {
-      throw new ErrorApplication("ID do pedido é obrigatório", 400);
-    }
-
-    if (!company_id) {
-      throw new ErrorApplication("company_id é obrigatório nos headers", 400);
-    }
-
-    const order = await this.getOrderWithDetails(id, company_id);
-
-    if (!order) {
-      throw new ErrorApplication("Pedido não encontrado", 404);
-    }
-
-    return res.json(order);
-  }
-
-  async delete(req, res) {
-    const { id } = req.params;
-    const company_id = req.headers['company_id'];
-
-    if (!company_id || !id) {
-      throw new ErrorApplication(
-        "company_id nos headers e ID do pedido são obrigatórios",
-        400
-      );
-    }
-
-    const order = await knex("orders").where({ id, company_id }).first();
-
-    if (!order) {
-      throw new ErrorApplication("Pedido não encontrado", 404);
-    }
-
-    // Deletar pedido (os produtos são deletados automaticamente por CASCADE)
-    await knex("orders").where({ id, company_id }).delete();
-
-    return res.json({ message: "Pedido excluído com sucesso" });
-  }
-
-  async update(req, res) {
-    const { id } = req.params;
-    const { status, address, payment_method, products, notes } = req.body;
-    const company_id = req.headers['company_id'];
-
-    if (!company_id) {
-      throw new ErrorApplication("company_id é obrigatório nos headers", 400);
-    }
-
-    const order = await knex("orders").where({ id, company_id }).first();
-
-    if (!order) {
-      throw new ErrorApplication("Pedido não encontrado.", 404);
-    }
-
-    const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss");
-    const trx = await knex.transaction();
-
-    try {
-      const updatedData = {
-        updated_at: now
-      };
-
-      // Atualizar produtos se fornecidos
-      if (products && Array.isArray(products) && products.length > 0) {
-        // Deletar produtos antigos
-        await trx("order_products").where({ order_id: id }).delete();
-
-        // Recalcular total
+        // Se enviou itens, adicionar ao pedido
+        let insertedItems = [];
         let total_value = 0;
-        const productsData = [];
 
-        for (const item of products) {
-          if (!item.product_id || !item.quantity || item.quantity <= 0) {
-            throw new ErrorApplication("Cada produto deve ter product_id e quantity válida", 400);
+        if (items && Array.isArray(items) && items.length > 0) {
+          const itemsToInsert = [];
+          
+          for (const item of items) {
+            const { 
+              produtos_id, 
+              additional_id = null,
+              quantity, 
+              price,
+              notes: item_notes = null
+            } = item;
+            
+            if (!produtos_id) {
+              throw new ErrorApplication('ID do produto é obrigatório', 400);
+            }
+
+            if (!quantity || quantity <= 0) {
+              throw new ErrorApplication('Quantidade deve ser maior que zero', 400);
+            }
+
+            // Verificar se o produto existe e pertence à empresa
+            const productExists = await trx('produtos')
+              .where({ id: produtos_id, company_id })
+              .first();
+            
+            if (!productExists) {
+              throw new ErrorApplication(`Produto ID ${produtos_id} não encontrado para esta empresa`, 404);
+            }
+
+            // Se tiver additional_id, verificar se existe e pertence à empresa
+            if (additional_id) {
+              const additionalExists = await trx('additional')
+                .where({ id: additional_id, company_id })
+                .first();
+              
+              if (!additionalExists) {
+                throw new ErrorApplication(`Adicional ID ${additional_id} não encontrado para esta empresa`, 404);
+              }
+            }
+
+            // Determinar o preço
+            let finalPrice = price;
+            if (!finalPrice) {
+              finalPrice = productExists.price;
+            }
+
+            if (!finalPrice || finalPrice <= 0) {
+              throw new ErrorApplication('Preço deve ser maior que zero', 400);
+            }
+
+            const itemTotal = parseFloat(finalPrice) * parseInt(quantity);
+            total_value += itemTotal;
+
+            itemsToInsert.push({
+              company_id,
+              produtos_id,
+              orders_id: order_id,
+              additional_id,
+              quantity: parseInt(quantity),
+              price: parseFloat(finalPrice),
+              notes: item_notes,
+              created_at: now,
+              updated_at: now
+            });
           }
 
-          const product = await trx("products")
-            .where({ id: item.product_id, company_id })
-            .first();
-
-          if (!product) {
-            throw new ErrorApplication(`Produto com ID ${item.product_id} não encontrado`, 404);
+          // Inserir os itens
+          const insertedIds = [];
+          for (const item of itemsToInsert) {
+            const itemResult = await trx('orders_itens').insert(item).returning('id');
+            const item_id = Array.isArray(itemResult) ? (itemResult[0]?.id || itemResult[0]) : itemResult.id;
+            insertedIds.push(item_id);
           }
+          
+          // Buscar os detalhes completos dos itens inseridos
+          if (insertedIds.length > 0) {
+            const itemsDetails = await trx('orders_itens')
+              .whereIn('id', insertedIds)
+              .select('*');
+              
+            insertedItems = await Promise.all(itemsDetails.map(async (item) => {
+              let itemDetails = { ...item };
+              
+              const product = await trx('produtos')
+                .where({ id: item.produtos_id })
+                .select('name', 'category')
+                .first();
+              
+              if (product) {
+                itemDetails.produto_name = product.name;
+                itemDetails.produto_category = product.category;
+              }
 
-          const unit_price = parseFloat(product.price);
-          const quantity = parseInt(item.quantity);
-          const subtotal = unit_price * quantity;
-
-          productsData.push({
-            order_id: id,
-            product_id: item.product_id,
-            quantity: quantity,
-            unit_price: unit_price,
-            subtotal: subtotal,
-            created_at: now
-          });
-
-          total_value += subtotal;
+              if (item.additional_id) {
+                const additional = await trx('additional')
+                  .where({ id: item.additional_id })
+                  .select('name', 'price')
+                  .first();
+                
+                if (additional) {
+                  itemDetails.additional_name = additional.name;
+                  itemDetails.additional_price = additional.price;
+                }
+              }
+              
+              return itemDetails;
+            }));
+          }
         }
 
-        // Inserir novos produtos
-        await trx("order_products").insert(productsData);
-        updatedData.total_value = total_value;
+        // Atualizar o total do pedido
+        await trx('orders')
+          .where({ id: order_id })
+          .update({ total_value });
+
+        return {
+          order_id,
+          items: insertedItems,
+          total_value
+        };
+      });
+
+      return response.status(201).json({ 
+        id: result.order_id,
+        items: result.items,
+        items_count: result.items.length,
+        total_value: result.total_value,
+        message: 'Pedido criado com sucesso' + (result.items.length > 0 ? ` com ${result.items.length} itens` : '')
+      });
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao criar pedido: ${error.message}`);
+    }
+  }
+
+  /**
+   * Lista todos os pedidos de uma empresa com filtros
+   */
+  async index(request, response) {
+    const { company_id } = request.headers;
+    const { client_id, date_start, date_end, date, status, payment_method } = request.query;
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
       }
 
-      if (status !== undefined) updatedData.status = status;
-      if (address !== undefined) updatedData.address = address;
-      if (payment_method !== undefined) updatedData.payment_method = payment_method;
-      if (notes !== undefined) updatedData.notes = notes;
+      let query = knex('orders')
+        .where({ 'orders.company_id': company_id })
+        .select([
+          'orders.id',
+          'orders.client_id',
+          'orders.status',
+          'orders.total_value',
+          'orders.address',
+          'orders.payment_method',
+          'orders.notes',
+          'orders.created_at',
+          'orders.updated_at',
+          'clients.name as client_name',
+          'clients.phone as client_phone',
+          'clients.document as client_document'
+        ])
+        .leftJoin('clients', 'orders.client_id', 'clients.id')
+        .orderBy('orders.created_at', 'desc');
 
-      await trx("orders").update(updatedData).where({ id, company_id });
+      // Aplicar filtros
+      if (client_id) {
+        query = query.where('orders.client_id', client_id);
+      }
 
-      await trx.commit();
+      if (date) {
+        query = query.whereRaw("DATE(orders.created_at) = ?", [date]);
+      } else if (date_start && date_end) {
+        query = query.whereBetween('orders.created_at', [date_start, date_end]);
+      }
+      
+      if (status) {
+        query = query.where('orders.status', status);
+      }
 
-      const updatedOrder = await this.getOrderWithDetails(id, company_id);
+      if (payment_method) {
+        query = query.where('orders.payment_method', payment_method);
+      }
 
-      return res.status(200).json({
-        message: "Pedido atualizado com sucesso.",
+      const orders = await query;
+
+      // Para cada pedido, buscar os itens
+      const ordersWithItems = await Promise.all(orders.map(async (order) => {
+        const items = await knex('orders_itens')
+          .where({ orders_id: order.id })
+          .select('*');
+
+        // Buscar detalhes adicionais para cada item
+        const itemsWithDetails = await Promise.all(items.map(async (item) => {
+          let itemDetails = { ...item };
+          
+          const product = await knex('produtos')
+            .where({ id: item.produtos_id })
+            .select('name', 'category')
+            .first();
+          
+          if (product) {
+            itemDetails.produto_name = product.name;
+            itemDetails.produto_category = product.category;
+          }
+
+          if (item.additional_id) {
+            const additional = await knex('additional')
+              .where({ id: item.additional_id })
+              .select('name', 'price')
+              .first();
+            
+            if (additional) {
+              itemDetails.additional_name = additional.name;
+              itemDetails.additional_price = additional.price;
+            }
+          }
+          
+          return itemDetails;
+        }));
+
+        return {
+          ...order,
+          items: itemsWithDetails,
+          items_count: items.length
+        };
+      }));
+
+      return response.json(ordersWithItems);
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao listar pedidos: ${error.message}`);
+    }
+  }
+
+  /**
+   * Obtém os detalhes de um pedido específico
+   */
+  async show(request, response) {
+    const { id } = request.params;
+    const { company_id } = request.headers;
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      // Buscar o pedido
+      const order = await knex('orders')
+        .where({ 'orders.id': id, 'orders.company_id': company_id })
+        .select([
+          'orders.id',
+          'orders.company_id',
+          'orders.client_id',
+          'orders.status',
+          'orders.total_value',
+          'orders.address',
+          'orders.payment_method',
+          'orders.notes',
+          'orders.created_at',
+          'orders.updated_at',
+          'clients.name as client_name',
+          'clients.email as client_email',
+          'clients.phone as client_phone',
+          'clients.document as client_document'
+        ])
+        .leftJoin('clients', 'orders.client_id', 'clients.id')
+        .first();
+
+      if (!order) {
+        throw new ErrorApplication('Pedido não encontrado', 404);
+      }
+
+      // Buscar os itens do pedido
+      const items = await knex('orders_itens')
+        .where({ orders_id: id })
+        .select('*');
+
+      // Detalhar cada item
+      const detailedItems = await Promise.all(items.map(async (item) => {
+        let itemDetails = { ...item };
+
+        const product = await knex('produtos')
+          .where({ id: item.produtos_id })
+          .select('name', 'category')
+          .first();
+        
+        itemDetails.produto_name = product ? product.name : 'Produto não encontrado';
+        itemDetails.produto_category = product ? product.category : '';
+
+        if (item.additional_id) {
+          const additional = await knex('additional')
+            .where({ id: item.additional_id })
+            .select('name', 'price')
+            .first();
+          
+          if (additional) {
+            itemDetails.additional_name = additional.name;
+            itemDetails.additional_price = additional.price;
+          }
+        }
+
+        return itemDetails;
+      }));
+
+      return response.json({
+        ...order,
+        items: detailedItems,
+        items_count: detailedItems.length
+      });
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao buscar detalhes do pedido: ${error.message}`);
+    }
+  }
+
+  /**
+   * Adiciona múltiplos itens ao pedido
+   */
+  async addMultipleItems(request, response) {
+    const { order_id } = request.params;
+    const { items } = request.body;
+    const { company_id } = request.headers;
+    const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss");
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      // Verificar se o pedido existe
+      const orderExists = await knex('orders').where({ id: order_id, company_id }).first();
+      
+      if (!orderExists) {
+        throw new ErrorApplication('Pedido não encontrado', 404);
+      }
+  
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new ErrorApplication('É necessário enviar pelo menos um item', 400);
+      }
+  
+      // Validar cada item e preparar para inserção
+      const itemsToInsert = [];
+      let additionalTotal = 0;
+      
+      for (const item of items) {
+        const { 
+          produtos_id, 
+          additional_id = null,
+          quantity, 
+          price,
+          notes = null
+        } = item;
+        
+        if (!produtos_id || !quantity || !price) {
+          throw new ErrorApplication('Cada item deve ter produtos_id, quantity e price', 400);
+        }
+  
+        if (quantity <= 0) {
+          throw new ErrorApplication('A quantidade deve ser maior que zero', 400);
+        }
+
+        if (price <= 0) {
+          throw new ErrorApplication('O preço deve ser maior que zero', 400);
+        }
+
+        // Verificar se o produto existe
+        const productExists = await knex('produtos').where({ id: produtos_id, company_id }).first();
+        if (!productExists) {
+          throw new ErrorApplication(`Produto ID ${produtos_id} não encontrado para esta empresa`, 404);
+        }
+
+        // Verificar adicional se fornecido
+        if (additional_id) {
+          const additionalExists = await knex('additional').where({ id: additional_id, company_id }).first();
+          if (!additionalExists) {
+            throw new ErrorApplication(`Adicional ID ${additional_id} não encontrado para esta empresa`, 404);
+          }
+        }
+
+        const itemTotal = parseFloat(price) * parseInt(quantity);
+        additionalTotal += itemTotal;
+        
+        itemsToInsert.push({
+          company_id,
+          produtos_id,
+          orders_id: order_id,
+          additional_id,
+          quantity: parseInt(quantity),
+          price: parseFloat(price),
+          notes,
+          created_at: now,
+          updated_at: now
+        });
+      }
+  
+      // Inserir todos os itens em uma transação
+      const insertedIds = await knex.transaction(async trx => {
+        const ids = [];
+        for (const item of itemsToInsert) {
+          const itemResult = await trx('orders_itens').insert(item).returning('id');
+          const item_id = Array.isArray(itemResult) ? (itemResult[0]?.id || itemResult[0]) : itemResult.id;
+          ids.push(item_id);
+        }
+
+        // Atualizar o total do pedido
+        await trx('orders')
+          .where({ id: order_id })
+          .increment('total_value', additionalTotal);
+
+        return ids;
+      });
+  
+      return response.status(201).json({ 
+        ids: insertedIds,
+        message: `${insertedIds.length} itens adicionados ao pedido com sucesso` 
+      });
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao adicionar itens ao pedido: ${error.message}`);
+    }
+  }
+
+  /**
+   * Remove um item do pedido
+   */
+  async removeItem(request, response) {
+    const { order_id, item_id } = request.params;
+    const { company_id } = request.headers;
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      // Verificar se o item existe no pedido
+      const itemExists = await knex('orders_itens')
+        .where({ id: item_id, orders_id: order_id, company_id })
+        .first();
+      
+      if (!itemExists) {
+        throw new ErrorApplication('Item não encontrado neste pedido', 404);
+      }
+
+      // Usar transação
+      await knex.transaction(async trx => {
+        // Calcular valor do item
+        const itemTotal = itemExists.price * itemExists.quantity;
+
+        // Remover o item
+        await trx('orders_itens')
+          .where({ id: item_id })
+          .delete();
+
+        // Atualizar o total do pedido
+        await trx('orders')
+          .where({ id: order_id })
+          .decrement('total_value', itemTotal);
+      });
+
+      return response.json({ message: 'Item removido do pedido com sucesso' });
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao remover item do pedido: ${error.message}`);
+    }
+  }
+
+  /**
+   * Atualiza a quantidade de um item
+   */
+  async updateItemQuantity(request, response) {
+    const { order_id, item_id } = request.params;
+    const { quantity } = request.body;
+    const { company_id } = request.headers;
+    const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss");
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      if (!quantity || quantity <= 0) {
+        throw new ErrorApplication('Quantidade deve ser maior que zero', 400);
+      }
+
+      // Verificar se o item existe
+      const itemExists = await knex('orders_itens')
+        .where({ id: item_id, orders_id: order_id, company_id })
+        .first();
+      
+      if (!itemExists) {
+        throw new ErrorApplication('Item não encontrado neste pedido', 404);
+      }
+
+      // Usar transação
+      await knex.transaction(async trx => {
+        // Calcular diferença no total
+        const oldTotal = itemExists.price * itemExists.quantity;
+        const newTotal = itemExists.price * quantity;
+        const difference = newTotal - oldTotal;
+
+        // Atualizar a quantidade
+        await trx('orders_itens')
+          .where({ id: item_id })
+          .update({ 
+            quantity: parseInt(quantity),
+            updated_at: now
+          });
+
+        // Atualizar o total do pedido
+        if (difference !== 0) {
+          await trx('orders')
+            .where({ id: order_id })
+            .increment('total_value', difference);
+        }
+      });
+
+      return response.json({ 
+        message: 'Quantidade do item atualizada com sucesso',
+        quantity
+      });
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao atualizar quantidade do item: ${error.message}`);
+    }
+  }
+
+  /**
+   * Atualiza o status de um pedido
+   */
+  async updateStatus(request, response) {
+    const { id } = request.params;
+    const { status } = request.body;
+    const { company_id } = request.headers;
+    const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss");
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      // Verificar se o pedido existe
+      const orderExists = await knex('orders').where({ id, company_id }).first();
+      
+      if (!orderExists) {
+        throw new ErrorApplication('Pedido não encontrado', 404);
+      }
+
+      // Validar o status
+      const validStatus = ['pending', 'confirmed', 'preparing', 'delivered', 'cancelled'];
+      
+      if (!status || !validStatus.includes(status)) {
+        throw new ErrorApplication(`Status inválido. Use: ${validStatus.join(', ')}`, 400);
+      }
+
+      // Atualizar o status
+      await knex('orders')
+        .where({ id })
+        .update({ 
+          status,
+          updated_at: now
+        });
+
+      return response.json({ 
+        message: `Status do pedido atualizado para ${status}`,
+        status
+      });
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao atualizar status do pedido: ${error.message}`);
+    }
+  }
+
+  /**
+   * Deleta um pedido
+   */
+  async delete(request, response) {
+    const { id } = request.params;
+    const { company_id } = request.headers;
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      // Verificar se o pedido existe
+      const orderExists = await knex('orders').where({ id, company_id }).first();
+      
+      if (!orderExists) {
+        throw new ErrorApplication('Pedido não encontrado', 404);
+      }
+
+      // Deletar o pedido (os itens serão deletados por cascata)
+      await knex('orders').where({ id }).delete();
+
+      return response.json({ message: 'Pedido excluído com sucesso' });
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao excluir pedido: ${error.message}`);
+    }
+  }
+
+  /**
+   * Lista pedidos por cliente
+   */
+  async listByClient(request, response) {
+    const { client_id } = request.params;
+    const { company_id } = request.headers;
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      const orders = await knex('orders')
+        .where({ client_id, company_id })
+        .select([
+          'orders.id',
+          'orders.status',
+          'orders.total_value',
+          'orders.address',
+          'orders.payment_method',
+          'orders.created_at',
+          'orders.updated_at'
+        ])
+        .orderBy('orders.created_at', 'desc');
+
+      // Para cada pedido, buscar contagem de itens
+      const ordersWithDetails = await Promise.all(orders.map(async (order) => {
+        const itemsCount = await knex('orders_itens')
+          .where({ orders_id: order.id })
+          .count('* as count')
+          .first();
+
+        return {
+          ...order,
+          items_count: parseInt(itemsCount.count)
+        };
+      }));
+
+      return response.json(ordersWithDetails);
+    } catch (error) {
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao listar pedidos do cliente: ${error.message}`);
+    }
+  }
+
+  /**
+   * Atualiza dados do pedido
+   */
+  async update(request, response) {
+    const { id } = request.params;
+    const { client_id, address, payment_method, notes } = request.body;
+    const { company_id } = request.headers;
+    const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss");
+    
+    try {
+      if (!company_id) {
+        throw new ErrorApplication('company_id é obrigatório nos headers', 400);
+      }
+
+      // Verificar se o pedido existe
+      const orderExists = await knex('orders').where({ id, company_id }).first();
+      
+      if (!orderExists) {
+        throw new ErrorApplication('Pedido não encontrado', 404);
+      }
+
+      const updateData = {};
+      
+      if (client_id) {
+        const clientExists = await knex('clients')
+          .where({ id: client_id, company_id })
+          .first();
+        
+        if (!clientExists) {
+          throw new ErrorApplication('Cliente não encontrado para esta empresa', 404);
+        }
+        
+        updateData.client_id = client_id;
+      }
+      
+      if (address !== undefined) updateData.address = address;
+      if (payment_method !== undefined) updateData.payment_method = payment_method;
+      if (notes !== undefined) updateData.notes = notes;
+      
+      if (Object.keys(updateData).length === 0) {
+        return response.json({ 
+          message: 'Nenhuma alteração fornecida',
+          order: orderExists
+        });
+      }
+      
+      updateData.updated_at = now;
+      
+      await knex('orders').where({ id }).update(updateData);
+      
+      const updatedOrder = await knex('orders').where({ id }).first();
+      
+      return response.json({ 
+        message: 'Pedido atualizado com sucesso',
         order: updatedOrder
       });
     } catch (error) {
-      await trx.rollback();
-      throw error;
+      if (error instanceof ErrorApplication) {
+        throw error;
+      }
+      throw new ErrorApplication(`Erro ao atualizar pedido: ${error.message}`);
     }
-  }
-
-  // Método auxiliar para buscar pedido com detalhes
-  async getOrderWithDetails(orderId, companyId) {
-    const order = await knex("orders")
-      .select(
-        "orders.id",
-        "orders.client_id",
-        "orders.status",
-        "orders.total_value",
-        "orders.address",
-        "orders.payment_method",
-        "orders.notes",
-        "orders.created_at",
-        "orders.updated_at",
-        "clients.name as client_name",
-        "clients.phone_number as client_phone",
-        "clients.document as client_document"
-      )
-      .leftJoin("clients", "orders.client_id", "clients.id")
-      .where({ "orders.id": orderId, "orders.company_id": companyId })
-      .first();
-
-    if (!order) {
-      return null;
-    }
-
-    // Buscar produtos do pedido
-    const products = await knex("order_products")
-      .select(
-        "order_products.id",
-        "order_products.product_id",
-        "order_products.quantity",
-        "order_products.unit_price",
-        "order_products.subtotal",
-        "products.name as product_name",
-        "products.category as product_category"
-      )
-      .leftJoin("products", "order_products.product_id", "products.id")
-      .where("order_products.order_id", orderId);
-
-    order.products = products;
-
-    return order;
-  }
-
-  // Método extra: Atualizar apenas o status
-  async updateStatus(req, res) {
-    const { id } = req.params;
-    const { status } = req.body;
-    const company_id = req.headers['company_id'];
-
-    if (!company_id) {
-      throw new ErrorApplication("company_id é obrigatório nos headers", 400);
-    }
-
-    if (!status) {
-      throw new ErrorApplication("Status é obrigatório", 400);
-    }
-
-    const validStatuses = ['pending', 'confirmed', 'preparing', 'delivered', 'cancelled'];
-    if (!validStatuses.includes(status)) {
-      throw new ErrorApplication(`Status inválido. Use: ${validStatuses.join(', ')}`, 400);
-    }
-
-    const order = await knex("orders").where({ id, company_id }).first();
-
-    if (!order) {
-      throw new ErrorApplication("Pedido não encontrado.", 404);
-    }
-
-    const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss");
-
-    await knex("orders")
-      .update({ status, updated_at: now })
-      .where({ id, company_id });
-
-    const updatedOrder = await this.getOrderWithDetails(id, company_id);
-
-    return res.status(200).json({
-      message: "Status do pedido atualizado com sucesso.",
-      order: updatedOrder
-    });
   }
 }
 
