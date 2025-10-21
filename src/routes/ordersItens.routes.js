@@ -9,5 +9,6 @@ ordersItensRoutes.get('/:order_id/items', OrdersItensController.listItems) // Li
 ordersItensRoutes.delete('/:order_id/items/:item_id', OrdersItensController.removeItem) // Remover item
 ordersItensRoutes.put('/:order_id/items/:item_id/quantity', OrdersItensController.updateItemQuantity) // Atualizar quantidade
 ordersItensRoutes.put('/:order_id/items/:item_id/price', OrdersItensController.updateItemPrice) // Atualizar preço
+ordersItensRoutes.put('/:order_id/items/:item_id/notes', OrdersItensController.updateItemNotes) // Atualizar observações
 
 module.exports = ordersItensRoutes

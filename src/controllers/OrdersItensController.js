@@ -42,7 +42,8 @@ class OrdersItensController {
         produtos_id, 
         additional_id = null,
         quantity, 
-        price
+        price,
+        notes = null
       } = item
 
       if (!produtos_id || !quantity || !price) {
@@ -80,6 +81,7 @@ class OrdersItensController {
         additional_id,
         quantity,
         price: parseFloat(price),
+        notes,
         created_at: now,
         updated_at: now
       })
@@ -96,6 +98,7 @@ class OrdersItensController {
         'additional_id',
         'quantity',
         'price',
+        'notes',
         'created_at',
         'updated_at'
       ])
@@ -246,6 +249,54 @@ class OrdersItensController {
   }
 
   /**
+   * Atualiza as observações de um item
+   */
+  async updateItemNotes(req, res) {
+    const { order_id, item_id } = req.params
+    const { notes } = req.body
+    const { company_id } = req.headers
+
+    if (!company_id) {
+      throw new ErrorApplication("É necessário enviar o ID da empresa", 400)
+    }
+
+    if (!order_id || !item_id) {
+      throw new ErrorApplication("É necessário enviar o ID do pedido e do item", 400)
+    }
+
+    // Verificar se o item existe e pertence ao pedido e à empresa
+    const item = await knex('orders_itens')
+      .where({ 
+        id: item_id, 
+        orders_id: order_id,
+        company_id 
+      })
+      .first()
+    
+    if (!item) {
+      throw new ErrorApplication('Item não encontrado', 404)
+    }
+
+    const now = moment().tz("America/Sao_Paulo").format("YYYY-MM-DD HH:mm:ss")
+
+    await knex('orders_itens')
+      .where({ id: item_id })
+      .update({ 
+        notes: notes || null,
+        updated_at: now
+      })
+
+    const updatedItem = await knex('orders_itens')
+      .where({ id: item_id })
+      .first()
+
+    return res.json({
+      message: 'Observações atualizadas com sucesso',
+      item: updatedItem
+    })
+  }
+
+  /**
    * Lista todos os itens de um pedido
    */
   async listItems(req, res) {
@@ -276,6 +327,7 @@ class OrdersItensController {
         'orders_itens.additional_id',
         'orders_itens.quantity',
         'orders_itens.price',
+        'orders_itens.notes',
         'orders_itens.created_at',
         'orders_itens.updated_at',
         'produtos.name as produto_name',
