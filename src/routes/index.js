@@ -11,6 +11,7 @@ const ordersRoute = require("./orders.routes")
 const additionalRoute = require("./additional.routes")
 const paymentMethodsRoute = require("./paymentMethods.routes")
 const photosRoute = require("./photos.routes")
+const sessionsRoute = require("./sessions.routes")
 
 routes.use("/superadmin", superAdminRoute)
 routes.use("/companies", companiesRoute)
@@ -22,5 +23,6 @@ routes.use("/orders", ordersRoute)
 routes.use("/additional", additionalRoute)
 routes.use("/payment-methods", paymentMethodsRoute)
 routes.use("/photos", photosRoute)
+routes.use("/sessions", sessionsRoute)
 
 module.exports = routes
