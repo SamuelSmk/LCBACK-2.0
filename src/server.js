@@ -3,6 +3,7 @@ require("express-async-errors");
 
 const express = require("express");
 const http = require("http");
+const path = require("path");
 const { Server } = require("socket.io");
 const AppError = require("./utils/appError");
 const routes = require("./routes");
@@ -26,6 +27,9 @@ app.set("socketio", io);
 
 app.use(cors());
 app.use(express.json());
+
+// Servir arquivos estáticos da pasta uploads/photos
+app.use('/photos', express.static(path.join(__dirname, '../uploads/photos')));
 
 app.use((req, res, next) => { 
   req.io = io; 
