@@ -4,7 +4,7 @@ const knex = require("../database/knex")
 
 class ProductsController {
   async create(req, res) {
-    const { name, price, category, notes } = req.body
+    const { name, price, category, notes, size } = req.body
     const { company_id } = req.headers
 
     if (!company_id) {
@@ -32,6 +32,7 @@ class ProductsController {
         price: parseFloat(price),
         category,
         notes: notes || null,
+        size: size !== undefined ? Boolean(size) : false,
         company_id,
         created_at: now,
         updated_at: now,
@@ -42,6 +43,7 @@ class ProductsController {
         "price",
         "category",
         "notes",
+        "size",
         "company_id",
         "created_at",
         "updated_at",
@@ -65,6 +67,7 @@ class ProductsController {
         "price",
         "category",
         "notes",
+        "size",
         "created_at",
         "updated_at"
       )
@@ -111,7 +114,7 @@ class ProductsController {
     }
 
     const product = await knex("produtos")
-      .select("id", "name", "price", "category", "notes", "company_id", "created_at", "updated_at")
+      .select("id", "name", "price", "category", "notes", "size", "company_id", "created_at", "updated_at")
       .where({ id, company_id })
       .first()
     
@@ -154,7 +157,7 @@ class ProductsController {
 
   async update(req, res) {
     const { id } = req.params
-    const { name, price, category, notes } = req.body
+    const { name, price, category, notes, size } = req.body
     const { company_id } = req.headers
 
     if (!company_id) {
@@ -178,12 +181,13 @@ class ProductsController {
       price: price ? parseFloat(price) : product.price,
       category,
       notes: notes !== undefined ? notes : product.notes,
+      size: size !== undefined ? Boolean(size) : product.size,
     }
 
     await knex("produtos").update(updatedData).where({ id, company_id })
 
     const updatedProduct = await knex("produtos")
-      .select("id", "name", "price", "category", "notes", "company_id", "created_at", "updated_at")
+      .select("id", "name", "price", "category", "notes", "size", "company_id", "created_at", "updated_at")
       .where({ id, company_id })
       .first()
 
