@@ -80,7 +80,22 @@ class ProductsController {
 
     const products = await productsQuery.orderBy("name", "asc")
 
-    return res.json(products)
+    // Buscar fotos para cada produto
+    const productsWithPhotos = await Promise.all(
+      products.map(async (product) => {
+        const photos = await knex("product_photos")
+          .select("id", "filename", "url")
+          .where({ produto_id: product.id, company_id })
+          .orderBy("created_at", "desc")
+
+        return {
+          ...product,
+          photos: photos || []
+        }
+      })
+    )
+
+    return res.json(productsWithPhotos)
   }
 
   async show(req, res) {
@@ -103,8 +118,17 @@ class ProductsController {
     if (!product) {
       throw new ErrorApplication("Produto não encontrado", 404)
     }
+
+    // Buscar fotos do produto
+    const photos = await knex("product_photos")
+      .select("id", "filename", "url")
+      .where({ produto_id: id, company_id })
+      .orderBy("created_at", "desc")
     
-    return res.json(product)
+    return res.json({
+      ...product,
+      photos: photos || []
+    })
   }
 
   async delete(req, res) {
